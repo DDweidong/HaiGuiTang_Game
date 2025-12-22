@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.weidong.gamebackend.mapper.TurtleSoupMapper">
+
+    <!-- 查询所有 -->
+    <select id="findAll" resultType="com.weidong.gamebackend.model.TurtleSoup">
+        SELECT * FROM completed_games ORDER BY completed_at DESC
+    </select>
+
+    <!-- 根据 user_id 查询多条记录 -->
+    <select id="findByUserId" parameterType="string" resultType="com.weidong.gamebackend.model.TurtleSoup">
+        SELECT * FROM completed_games
+        WHERE user_id = #{userId}
+        ORDER BY completed_at DESC
+    </select>
+
+    <!-- 插入新记录 -->
+    <insert id="insert" parameterType="com.weidong.gamebackend.model.TurtleSoup" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO completed_games (user_id, room_id, title, solution, completed_at)
+        VALUES (#{userId}, #{roomId}, #{title}, #{solution}, NOW())
+    </insert>
+
+</mapper>

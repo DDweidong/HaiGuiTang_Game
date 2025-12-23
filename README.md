@@ -1,4 +1,16 @@
-运行截图
+全栈式海龟汤情境推理游戏：结合传统谜题与现代 AI 技术，提供沉浸式推理体验。
+
+技术栈
+后端:
+Java 17 + Spring Boot 3.5.9
+MyBatis + MySQL (数据持久化)
+LangChain4j + 阿里云百炼平台 (大模型集成)
+RESTful API 设计
+前端:
+Vue 3 + Vue Router
+Element Plus (UI 组件库)
+Vite (构建工具)
+响应式设计
 
 <img width="1215" height="492" alt="Image" src="https://github.com/user-attachments/assets/9ad362e7-cce6-40ae-b1ce-c234f49dd559" />
 

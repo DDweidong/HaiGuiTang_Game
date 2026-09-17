@@ -1,0 +1,17 @@
+# 开发环境配置
+spring:
+  datasource:
+    # allowPublicKeyRetrieval: MySQL 8 默认 caching_sha2_password，本地无 SSL 时需允许取公钥（仅开发环境）
+    url: jdbc:mysql://localhost:3306/haiguitang?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8&allowPublicKeyRetrieval=true
+    username: ${DB_USERNAME:root}
+    # 数据库密码走环境变量 DB_PASSWORD（IDEA 运行配置或系统环境变量中设置）
+    password: ${DB_PASSWORD}
+  flyway:
+    # 开发库已存在手工建的表，用 baseline 标记为已迁移，避免 V1 重复执行报错；
+    # 全新数据库不受影响，V1 正常执行
+    baseline-on-migrate: true
+
+logging:
+  level:
+    # 开发环境打印本项目的调试日志
+    com.weidong.gamebackend: debug

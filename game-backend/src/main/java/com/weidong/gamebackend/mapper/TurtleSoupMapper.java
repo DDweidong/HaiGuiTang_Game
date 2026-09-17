@@ -1,20 +1,13 @@
 package com.weidong.gamebackend.mapper;
 
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.weidong.gamebackend.model.TurtleSoup;
 import org.apache.ibatis.annotations.Mapper;
-import org.apache.ibatis.annotations.Param;
 
-import java.util.List;
-
+/**
+ * 完成记录 Mapper。
+ * 继承 BaseMapper 获得单表通用 CRUD；复杂 SQL 再补充自定义方法。
+ */
 @Mapper
-public interface TurtleSoupMapper {
-
-    // 查询所有海龟汤记录
-    List<TurtleSoup> findAll();
-
-    // 根据 user_id 查询该用户的所有海龟汤记录
-    List<TurtleSoup> findByUserId(@Param("userId") String userId);
-
-    // 新增一条海龟汤记录
-    int insert(TurtleSoup turtleSoup);
+public interface TurtleSoupMapper extends BaseMapper<TurtleSoup> {
 }

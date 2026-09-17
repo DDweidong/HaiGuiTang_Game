@@ -34,13 +34,13 @@ onMounted(async () => {
     // 从全局属性获取用户ID
     const userId = window.gameUserId
     
-    // 向指定地址发送GET请求
-    const response = await fetch(`http://localhost:8080/turtle-soups/${userId}`)
-    
+    // 向指定地址发送GET请求（后端统一响应体 Result{data:{records}}，临时取前100条，W2 做前端分页）
+    const response = await fetch(`http://localhost:8080/turtle-soups/${userId}?pageNum=1&pageSize=100`)
+
     if (response.ok) {
-      const data = await response.json()
-      // 使用返回的数据更新卡片
-      cards.value = data.map(item => ({
+      const result = await response.json()
+      // 使用返回的分页数据更新卡片
+      cards.value = (result.data?.records || []).map(item => ({
         title: item.title,
         solution: item.solution
       }))

@@ -84,20 +84,7 @@ const startGame = async () => {
       })
     })
     
-    if (response.ok) {
-      const text = await response.text()
-      messages.value.push({ sender: 'ai', text: text })
-      
-      // 检查是否包含"游戏结束"
-      if (text.includes("游戏结束")) {
-        gameEnded.value = true
-      }
-      
-      scrollToBottom()
-    } else {
-      messages.value.push({ sender: 'ai', text: "抱歉，初始化游戏时出现错误。" })
-      scrollToBottom()
-    }
+    await handleChatResponse(response, '抱歉，初始化游戏时出现错误。')
   } catch (error) {
     console.error('Error:', error)
     messages.value.push({ sender: 'ai', text: "网络错误，请检查连接后重试。" })
@@ -131,17 +118,7 @@ const sendMessage = async () => {
           })
         })
         
-        if (response.ok) {
-          const text = await response.text()
-          messages.value.push({ sender: 'ai', text: text })
-          
-          // 检查是否包含"游戏结束"
-          if (text.includes("游戏结束")) {
-            gameEnded.value = true
-          }
-          
-          scrollToBottom()
-        }
+        await handleChatResponse(response, '抱歉，获取答案时出现错误。')
       } catch (error) {
         console.error('Error:', error)
       }
@@ -161,20 +138,7 @@ const sendMessage = async () => {
         })
       })
       
-      if (response.ok) {
-        const text = await response.text()
-        messages.value.push({ sender: 'ai', text: text })
-        
-        // 检查是否包含"游戏结束"
-        if (text.includes("游戏结束")) {
-          gameEnded.value = true
-        }
-        
-        scrollToBottom()
-      } else {
-        messages.value.push({ sender: 'ai', text: "抱歉，发送消息时出现错误。" })
-        scrollToBottom()
-      }
+      await handleChatResponse(response, '抱歉，发送消息时出现错误。')
     } catch (error) {
       console.error('Error:', error)
       messages.value.push({ sender: 'ai', text: "网络错误，请检查连接后重试。" })
@@ -200,6 +164,26 @@ const resetGame = () => {
   userInput.value = ''
   messageCount.value = 0
   memoryId.value = ''
+}
+
+// 解析后端统一响应体 Result{code,message,data}，把 AI 回复加入消息列表；
+// 后端返回业务错误码时展示 message，网络/解析异常时展示兜底文案
+const handleChatResponse = async (response, fallbackMsg) => {
+  try {
+    const result = await response.json()
+    if (response.ok && result.code === 0) {
+      messages.value.push({ sender: 'ai', text: result.data })
+      // 约定: 游戏结束时 AI 回复首行为"游戏结束"
+      if (result.data.includes('游戏结束')) {
+        gameEnded.value = true
+      }
+    } else {
+      messages.value.push({ sender: 'ai', text: result.message || fallbackMsg })
+    }
+  } catch (error) {
+    messages.value.push({ sender: 'ai', text: fallbackMsg })
+  }
+  scrollToBottom()
 }
 
 const scrollToBottom = () => {

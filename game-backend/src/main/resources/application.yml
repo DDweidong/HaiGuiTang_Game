@@ -1,0 +1,31 @@
+spring:
+  application:
+    name: game-backend
+  # 通过环境变量切换环境，默认 dev
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+
+# MyBatis-Plus 配置
+mybatis-plus:
+  configuration:
+    # 数据库下划线字段(user_id) 自动映射实体驼峰属性(userId)
+    map-underscore-to-camel-case: true
+    # SQL 日志走 SLF4J，统一日志出口
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+  global-config:
+    banner: false
+
+# 阿里云百炼(通义千问) 大模型接入
+langchain4j:
+  community:
+    dashscope:
+      chat-model:
+        # API Key 必须走环境变量，禁止写入配置文件
+        api-key: ${DASH_SCOPE_API_KEY}
+        model-name: qwen-max
+
+# 接口文档(Swagger UI)
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha

@@ -47,13 +47,19 @@ Node `^20.19.0 || >=22.12.0` required. No test or lint setup exists.
 
 Key contract between prompt and frontend: when the game ends, the LLM must output a response whose **first line is exactly `游戏结束`**. `HomeView.vue` detects the end of game with `text.includes("游戏结束")` — never break this string in the prompt or the UI.
 
+### Auth (W2 用户体系)
+
+- 注册/登录 (`POST /auth/register`、`/auth/login`) 返回双 token: access 30 分钟 + refresh 7 天（JJWT 0.12 签发，HS256，密钥 `JWT_SECRET` 环境变量注入，dev 有默认值）。
+- `JwtAuthenticationFilter` (`security/`) 解析 `Authorization: Bearer` 并把 `LoginUser` 放入 SecurityContext；`SecurityConfig` 无状态配置（关闭 Session/CSRF），`/auth/**` 与 swagger 放行，其余接口需认证。401/403 由 `RestAuthenticationEntryPoint`/`RestAccessDeniedHandler` 输出统一 Result JSON（40100/40300）。
+- refresh 不轮换（无状态 JWT 无法作废旧 token，Redis 上线后升级）；密码 BCrypt；登录失败统一提示防用户名枚举。
+
 ### Chat flow
 
-1. Frontend generates `memoryId = "${userId}/${timestamp}"` (in `HomeView.vue`) and sends `PUT /chat` with `{memoryId, message}` (validated via `@Valid` `dto/ChatRequest`).
-2. `GameController` delegates to `GameAgent.chat(memoryId, message)` — a synchronous call returning the raw AI reply as a plain `String` (no SSE/streaming).
-3. `GameAgentConfig` provides a `ChatMemoryProvider`: per-memoryId `MessageWindowChatMemory` with max 60 messages, in-memory only (Redis planned).
-4. When the player guesses correctly, the LLM itself invokes the `saveGameResult` tool (`tool/GameResultTool.java`, registered via `@AiService(tools=...)`) which parses `userId` from the `memoryId` prefix and inserts a row into `completed_games` via `TurtleSoupService` (MyBatis-Plus `IService`, no XML mapper).
-5. Frontend forces a reveal after 30 user messages by sending "猜不出来，公布答案".
+1. 前端生成 `memoryId = "${userId}/${timestamp}"`（`HomeView.vue`，userId 来自登录态）并发送 `PUT /chat`（`@Valid` `dto/ChatRequest`）；`GameController` 校验 memoryId 前缀与登录用户一致，防止伪造他人会话。
+2. `GameController` 委托 `GameAgent.chat(memoryId, message)` — 同步调用返回原始 AI 回复字符串（无 SSE/流式）。
+3. `GameAgentConfig` 提供 `ChatMemoryProvider`: per-memoryId `MessageWindowChatMemory`，最多 60 条，内存存储（Redis 计划中）。
+4. 玩家猜对时 LLM 自主调用 `saveGameResult` 工具（`tool/GameResultTool.java`）: userId **从 Spring Security 上下文取**（工具与 /chat 同一请求线程同步执行），不经过 LLM；roomId 为 memoryId，title/solution 由 LLM 提供，落库 `completed_games`。
+5. 前端在 30 条消息后强制揭晓答案（"猜不出来，公布答案"）。
 
 ### Web layer conventions
 
@@ -64,21 +70,26 @@ Key contract between prompt and frontend: when the game ends, the LLM must outpu
 
 ### REST endpoints
 
-- `PUT /chat` — chat with the AI host (unified Result)
-- `GET /turtle-soups?pageNum=1&pageSize=10` — paginated completed-game records
-- `GET /turtle-soups/{userId}` — completed games of one user
-- `POST /turtle-soups` — create a record (validated `TurtleSoupCreateRequest`)
+- `POST /auth/register` — 注册（注册即登录，返回令牌对 + userId/username）
+- `POST /auth/login` — 登录，返回 access/refresh 令牌对
+- `POST /auth/refresh` — refresh 换新 accessToken
+- `PUT /chat` — chat with the AI host（需认证，校验 memoryId 归属）
+- `GET /turtle-soups?pageNum=1&pageSize=10` — 分页查询**当前登录用户**的完成记录
+- `POST /turtle-soups` — create a record（userId 从登录态取，请求体不含 userId）
 
 ### Frontend structure
 
-- `src/main.js` — creates/reads a UUID in `localStorage` as `gameUserId`, exposed as global `window.gameUserId` (views read it directly; no auth).
-- Routes: `/home` (game, `HomeView.vue`), `/profile` (completed games, `ProfileView.vue`); `Sidebar.vue` in `App.vue`.
+- `src/api/http.js` — axios 实例: baseURL 走 `VITE_API_BASE_URL`（`.env.development` 指向 localhost:8080）；请求拦截器带 Bearer；响应拦截器解包 `Result`、统一 ElMessage 报错、401 自动 refresh 重放（并发锁防重复刷新）。
+- `src/utils/auth.js` — token 与用户信息存取（localStorage: hgt_access_token / hgt_refresh_token / hgt_user）。
+- 路由守卫 (`router/index.js`): 未登录访问受限页跳 `/login`；已登录访问 `/login` 跳首页。
+- Routes: `/home` (game, `HomeView.vue`), `/profile` (completed games, `ProfileView.vue`), `/login` (`AuthView.vue`, 登录/注册); `Sidebar.vue`（含用户名与退出登录）只在非登录页显示（`App.vue` 控制）。
 - `@` alias resolves to `src/` (configured in both `vite.config.js` and `jsconfig.json`).
-- Views parse the unified `Result` envelope: `result.code === 0` → use `result.data`, else show `result.message`.
+- 拦截器已解包 Result，视图里 `await http.get(...)` 直接拿到 `data`，无需再判断 code。
 
 ### Gotchas
 
-- Backend URL `http://localhost:8080` is hardcoded in `HomeView.vue` and `ProfileView.vue` — there is no API client abstraction or Vite proxy. Backend CORS (`CorsConfig.java`) only allows `http://localhost:5173`.
-- `GameResultTool.saveGameResult` is called by the LLM with free-form `title`/`solution` arguments; `memoryId` must contain `/` or the save is rejected.
+- CORS 必须注册在 **Security 层**（`CorsConfig` 提供 `CorsConfigurationSource` bean + `http.cors(withDefaults())`）: 401/403 由 Security 过滤器直接写出、不经过 MVC，只配 `WebMvcConfigurer` 时这些响应无 CORS 头，浏览器报 CORS 错误且前端拿不到 401 状态码，自动刷新链路失效。
+- LangChain4j 1.20.0-beta30 的 `@V` 参数传播**不生效**（参数会暴露给 LLM 被自由发挥），勿使用；用户身份一律从 SecurityContext 取，不经过 LLM。
+- `GameResultTool.saveGameResult` 的 title/solution 由 LLM 自由发挥填写；LLM 可能"只恭喜不调用工具"（prompt 已强化，工具入口有日志；根治靠 W3 结构化输出）。
 - Version pins (rationale in pom comments): MyBatis-Plus locked at 3.5.9 (3.5.17 restructured packages; 3.5.9 needs explicit `mybatis-plus-extension` + `mybatis-plus-jsqlparser` modules for Page/分页插件); SpringDoc locked at 2.8.x (3.x pulls Spring Boot 4 modules, causing `conventionErrorViewResolver` duplicate-registration startup failure); LangChain4j spring starters only exist as betas.
 - Test coverage is minimal (a single `contextLoads` test); the Spring context pulls in the datasource and LangChain4j config, so tests need a running MySQL and `DB_PASSWORD`.

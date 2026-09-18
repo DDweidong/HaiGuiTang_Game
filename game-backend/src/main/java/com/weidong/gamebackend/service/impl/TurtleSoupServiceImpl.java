@@ -15,13 +15,6 @@ import org.springframework.stereotype.Service;
 public class TurtleSoupServiceImpl extends ServiceImpl<TurtleSoupMapper, TurtleSoup> implements TurtleSoupService {
 
     @Override
-    public PageResult<TurtleSoupVO> pageSoups(long pageNum, long pageSize) {
-        Page<TurtleSoup> page = page(new Page<>(pageNum, pageSize),
-                new LambdaQueryWrapper<TurtleSoup>().orderByDesc(TurtleSoup::getCompletedAt));
-        return toPageResult(page);
-    }
-
-    @Override
     public PageResult<TurtleSoupVO> pageSoupsByUser(String userId, long pageNum, long pageSize) {
         Page<TurtleSoup> page = page(new Page<>(pageNum, pageSize),
                 new LambdaQueryWrapper<TurtleSoup>()

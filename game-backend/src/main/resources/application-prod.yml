@@ -15,3 +15,7 @@ springdoc:
     enabled: false
   swagger-ui:
     enabled: false
+
+jwt:
+  # 生产密钥必须由部署平台注入（无默认值，缺失则启动失败，防止误用开发密钥）
+  secret: ${JWT_SECRET}

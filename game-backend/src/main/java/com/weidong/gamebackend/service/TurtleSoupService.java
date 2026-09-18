@@ -11,9 +11,6 @@ import com.weidong.gamebackend.vo.TurtleSoupVO;
  */
 public interface TurtleSoupService extends IService<TurtleSoup> {
 
-    /** 分页查询全部完成记录，按完成时间倒序 */
-    PageResult<TurtleSoupVO> pageSoups(long pageNum, long pageSize);
-
     /** 分页查询指定用户的完成记录，按完成时间倒序 */
     PageResult<TurtleSoupVO> pageSoupsByUser(String userId, long pageNum, long pageSize);
 

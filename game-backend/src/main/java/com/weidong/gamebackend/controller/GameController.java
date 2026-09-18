@@ -1,8 +1,12 @@
 package com.weidong.gamebackend.controller;
 
 import com.weidong.gamebackend.assistant.GameAgent;
+import com.weidong.gamebackend.common.ErrorCode;
 import com.weidong.gamebackend.common.Result;
+import com.weidong.gamebackend.common.exception.BusinessException;
 import com.weidong.gamebackend.dto.ChatRequest;
+import com.weidong.gamebackend.security.LoginUser;
+import com.weidong.gamebackend.security.SecurityUtil;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -25,7 +29,17 @@ public class GameController {
     @PutMapping("/chat")
     @Operation(summary = "与 AI 主持人对话", description = "返回 AI 的完整回复文本；当回复首行为\"游戏结束\"时表示本局结束")
     public Result<String> chat(@Valid @RequestBody ChatRequest request) {
-        String reply = gameAgent.chat(request.getMemoryId(), request.getMessage());
+        LoginUser loginUser = SecurityUtil.currentUser();
+
+        // memoryId 约定为 "userId/timestamp"，校验前缀与登录用户一致，
+        // 防止伪造他人会话、读写他人对话记忆
+        String memoryId = request.getMemoryId();
+        String expectedPrefix = loginUser.id() + "/";
+        if (memoryId == null || !memoryId.startsWith(expectedPrefix)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN, "会话不属于当前用户");
+        }
+
+        String reply = gameAgent.chat(memoryId, request.getMessage());
         return Result.success(reply);
     }
 }

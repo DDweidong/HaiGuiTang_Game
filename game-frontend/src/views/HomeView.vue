@@ -47,7 +47,8 @@
 
 <script setup>
 import { ref, nextTick } from 'vue'
-import { useRouter } from 'vue-router'
+import http from '../api/http'
+import { getUser } from '../utils/auth'
 
 const gameStarted = ref(false)
 const gameEnded = ref(false)
@@ -56,38 +57,27 @@ const userInput = ref('')
 const messagesContainer = ref(null)
 const memoryId = ref('')
 const messageCount = ref(0)
-const router = useRouter()
 
 const startGame = async () => {
   gameStarted.value = true
   gameEnded.value = false
   messageCount.value = 0
-  
-  // 生成memoryId: userId/时间戳
-  const userId = window.gameUserId
-  const timestamp = Date.now()
-  memoryId.value = `${userId}/${timestamp}`
-  
+
+  // 生成memoryId: 登录用户ID/时间戳（后端会校验前缀与登录态一致）
+  memoryId.value = `${getUser().userId}/${Date.now()}`
+
   // 清空消息
   messages.value = []
-  
-  // 发送初始请求
+
   try {
-    const response = await fetch('http://localhost:8080/chat', {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        memoryId: memoryId.value,
-        message: "开始游戏"
-      })
+    // http 拦截器已解包 Result，直接拿到 AI 回复文本
+    const reply = await http.put('/chat', {
+      memoryId: memoryId.value,
+      message: '开始游戏'
     })
-    
-    await handleChatResponse(response, '抱歉，初始化游戏时出现错误。')
+    handleChatReply(reply)
   } catch (error) {
-    console.error('Error:', error)
-    messages.value.push({ sender: 'ai', text: "网络错误，请检查连接后重试。" })
+    messages.value.push({ sender: 'ai', text: '抱歉，初始化游戏时出现错误。' })
     scrollToBottom()
   }
 }
@@ -99,49 +89,34 @@ const sendMessage = async () => {
     const userMessage = userInput.value
     userInput.value = ''
     messageCount.value++
-    
+
     // 滚动到底部
     scrollToBottom()
-    
+
     // 检查是否达到30条消息限制
     if (messageCount.value >= 30) {
       // 自动发送"猜不出来，公布答案"
       try {
-        const response = await fetch('http://localhost:8080/chat', {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            memoryId: memoryId.value,
-            message: "猜不出来，公布答案"
-          })
+        const reply = await http.put('/chat', {
+          memoryId: memoryId.value,
+          message: '猜不出来，公布答案'
         })
-        
-        await handleChatResponse(response, '抱歉，获取答案时出现错误。')
+        handleChatReply(reply)
       } catch (error) {
         console.error('Error:', error)
       }
       return
     }
-    
+
     // 发送用户消息到后端
     try {
-      const response = await fetch('http://localhost:8080/chat', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          memoryId: memoryId.value,
-          message: userMessage
-        })
+      const reply = await http.put('/chat', {
+        memoryId: memoryId.value,
+        message: userMessage
       })
-      
-      await handleChatResponse(response, '抱歉，发送消息时出现错误。')
+      handleChatReply(reply)
     } catch (error) {
-      console.error('Error:', error)
-      messages.value.push({ sender: 'ai', text: "网络错误，请检查连接后重试。" })
+      messages.value.push({ sender: 'ai', text: '网络错误，请检查连接后重试。' })
       scrollToBottom()
     }
   }
@@ -166,22 +141,11 @@ const resetGame = () => {
   memoryId.value = ''
 }
 
-// 解析后端统一响应体 Result{code,message,data}，把 AI 回复加入消息列表；
-// 后端返回业务错误码时展示 message，网络/解析异常时展示兜底文案
-const handleChatResponse = async (response, fallbackMsg) => {
-  try {
-    const result = await response.json()
-    if (response.ok && result.code === 0) {
-      messages.value.push({ sender: 'ai', text: result.data })
-      // 约定: 游戏结束时 AI 回复首行为"游戏结束"
-      if (result.data.includes('游戏结束')) {
-        gameEnded.value = true
-      }
-    } else {
-      messages.value.push({ sender: 'ai', text: result.message || fallbackMsg })
-    }
-  } catch (error) {
-    messages.value.push({ sender: 'ai', text: fallbackMsg })
+// 把 AI 回复加入消息列表；约定: 游戏结束时 AI 回复包含"游戏结束"
+const handleChatReply = (reply) => {
+  messages.value.push({ sender: 'ai', text: reply })
+  if (reply.includes('游戏结束')) {
+    gameEnded.value = true
   }
   scrollToBottom()
 }

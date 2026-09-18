@@ -29,3 +29,9 @@ springdoc:
   swagger-ui:
     path: /swagger-ui.html
     tags-sorter: alpha
+
+# JWT: 双 token 有效期（毫秒）。密钥按环境区分，见 dev/prod profile
+jwt:
+  # access: 30 分钟，控制凭据暴露窗口；refresh: 7 天，减少重复登录
+  access-expiration: 1800000
+  refresh-expiration: 604800000

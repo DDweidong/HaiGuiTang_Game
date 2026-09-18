@@ -7,25 +7,39 @@
       <p>海龟汤是一款逻辑推理游戏，通过提问找出事件背后的真相。</p>
     </div>
     <ul>
-      <li 
-        v-for="item in menuItems" 
-        :key="item.name" 
+      <li
+        v-for="item in menuItems"
+        :key="item.name"
         :class="{ active: $route.name === item.route }"
         @click="$router.push({ name: item.route })"
       >
         {{ item.name }}
       </li>
     </ul>
+    <div class="user-area">
+      <div class="username">{{ user.username }}</div>
+      <button class="logout-btn" @click="logout">退出登录</button>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { getUser, clearLogin } from '../utils/auth'
+
+const router = useRouter()
+const user = ref(getUser() || { username: '' })
 
 const menuItems = ref([
   { name: '首页', route: 'home' },
   { name: '我的页面', route: 'profile' }
 ])
+
+function logout() {
+  clearLogin()
+  router.push({ name: 'login' })
+}
 </script>
 
 <style scoped>
@@ -84,5 +98,39 @@ const menuItems = ref([
 .sidebar li.active {
   background-color: #42b983;
   color: white;
+}
+
+.user-area {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid #ddd;
+}
+
+.username {
+  font-size: 16px;
+  color: #333;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.logout-btn {
+  font-size: 14px;
+  color: #666;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.logout-btn:hover {
+  background-color: #e0e0e0;
 }
 </style>

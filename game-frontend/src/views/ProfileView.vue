@@ -26,31 +26,20 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import http from '../api/http'
 
 const cards = ref([])
 
 onMounted(async () => {
   try {
-    // 从全局属性获取用户ID
-    const userId = window.gameUserId
-    
-    // 向指定地址发送GET请求（后端统一响应体 Result{data:{records}}，临时取前100条，W2 做前端分页）
-    const response = await fetch(`http://localhost:8080/turtle-soups/${userId}?pageNum=1&pageSize=100`)
-
-    if (response.ok) {
-      const result = await response.json()
-      // 使用返回的分页数据更新卡片
-      cards.value = (result.data?.records || []).map(item => ({
-        title: item.title,
-        solution: item.solution
-      }))
-    } else {
-      // 如果请求不成功，则设置为空数组
-      cards.value = []
-    }
+    // 后端从登录态取 userId，只返回本人记录（http 拦截器已解包 Result 为 data）
+    const data = await http.get('/turtle-soups', { params: { pageNum: 1, pageSize: 100 } })
+    cards.value = (data.records || []).map(item => ({
+      title: item.title,
+      solution: item.solution
+    }))
   } catch (error) {
     console.error('获取数据失败:', error)
-    // 出错时设置为空数组
     cards.value = []
   }
 })

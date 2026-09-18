@@ -5,14 +5,11 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * 保存完成记录请求体。id / completedAt 由服务端生成，不接受客户端传入。
+ * 保存完成记录请求体。id / userId / completedAt 由服务端生成，不接受客户端传入。
  */
 @Data
 @NoArgsConstructor
 public class TurtleSoupCreateRequest {
-
-    @NotBlank(message = "用户ID不能为空")
-    private String userId;
 
     @NotBlank(message = "会话ID不能为空")
     private String roomId;

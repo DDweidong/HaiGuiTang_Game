@@ -1,7 +1,7 @@
 <template>
   <div id="app">
-    <Sidebar />
-    <div class="main-content">
+    <Sidebar v-if="$route.name !== 'login'" />
+    <div class="main-content" :class="{ full: $route.name === 'login' }">
       <router-view />
     </div>
   </div>
@@ -20,5 +20,10 @@ import Sidebar from './components/Sidebar.vue'
   flex: 1;
   margin-left: 200px;
   padding: 20px;
+}
+
+.main-content.full {
+  margin-left: 0;
+  padding: 0;
 }
 </style>

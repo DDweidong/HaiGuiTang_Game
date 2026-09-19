@@ -2,6 +2,7 @@ package com.weidong.gamebackend.tool;
 
 import com.weidong.gamebackend.model.TurtleSoup;
 import com.weidong.gamebackend.security.SecurityUtil;
+import com.weidong.gamebackend.service.GameStateService;
 import com.weidong.gamebackend.service.TurtleSoupService;
 import dev.langchain4j.agent.tool.Tool;
 import dev.langchain4j.agent.tool.ToolMemoryId;
@@ -23,6 +24,9 @@ public class GameResultTool {
     @Autowired
     private TurtleSoupService turtleSoupService;
 
+    @Autowired
+    private GameStateService gameStateService;
+
     /**
      * 当玩家猜对海龟汤真相时，调用此工具保存游戏记录。
      * 用户身份不经过 LLM（LLM 不可见、不可伪造）。
@@ -37,7 +41,7 @@ public class GameResultTool {
      * @param title    题目标题
      * @param solution 真相内容
      */
-    @Tool("当游戏结束时（玩家猜对真相，或玩家要求公布答案/结束游戏），调用此方法保存游戏完成记录")
+    @Tool("当玩家猜对真相时，调用此方法保存游戏完成记录（玩家要求公布答案的场景由系统处理，无需调用本工具）")
     public String saveGameResult(@ToolMemoryId String memoryId, String title, String solution) {
         // 入口日志: 用于区分"LLM 未调用工具"与"调用后执行失败"两类问题
         log.info("收到保存游戏记录请求, memoryId={}, title={}", memoryId, title);
@@ -50,6 +54,9 @@ public class GameResultTool {
             record.setCompletedAt(LocalDateTime.now());
 
             turtleSoupService.saveTurtleSoup(record);
+            // 落库成功即置状态机终态 SOLVED，/chat 流结束后读取它放入 done 事件，
+            // 前端以此结束游戏（状态驱动，不依赖 AI 文本里的"游戏结束"标记）
+            gameStateService.markSolved(memoryId);
 
             log.info("游戏记录保存成功, memoryId={}", memoryId);
             // 注意: 该返回值会作为工具执行结果进入 LLM 上下文，参与下一轮生成，

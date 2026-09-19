@@ -59,9 +59,6 @@ const messagesContainer = ref(null)
 const memoryId = ref('')
 const messageCount = ref(0)
 
-// 揭晓/结束类请求: 与后端 prompt 铁律的触发词保持一致
-const REVEAL_PATTERN = /公布答案|揭晓答案|结束游戏|猜不出来|放弃|不玩了/
-
 const startGame = async () => {
   gameStarted.value = true
   gameEnded.value = false
@@ -73,7 +70,7 @@ const startGame = async () => {
   // 清空消息
   messages.value = []
 
-  await sendToAi('开始游戏', false)
+  await sendToAi('开始游戏')
 }
 
 const sendMessage = async () => {
@@ -85,14 +82,13 @@ const sendMessage = async () => {
   messageCount.value++
   scrollToBottom()
 
-  // 达到30条消息上限自动揭晓；前端主动发起的揭晓，回复到达即视为游戏结束
-  // （不依赖 AI 回复里的"游戏结束"标记——qwen-max 指令遵循不稳定，见后端 prompt 铁律）
-  const reveal = messageCount.value >= 30
-  await sendToAi(reveal ? '猜不出来，公布答案' : userMessage, reveal || REVEAL_PATTERN.test(userMessage))
+  // 达到30条消息上限自动揭晓（后端识别该文案走结构化输出分支）
+  const message = messageCount.value >= 30 ? '猜不出来，公布答案' : userMessage
+  await sendToAi(message)
 }
 
 // 发送消息并流式接收 AI 回复：先放一个空的 AI 气泡占位，token 到达时增量填充
-const sendToAi = async (message, forceEnd) => {
+const sendToAi = async (message) => {
   sending.value = true
   const aiIndex = messages.value.push({ sender: 'ai', text: '' }) - 1
   scrollToBottom()
@@ -103,9 +99,9 @@ const sendToAi = async (message, forceEnd) => {
       messages.value[aiIndex].text += text
       scrollToBottom()
     },
-    onDone: () => {
-      // 约定: 游戏结束时 AI 回复包含"游戏结束"；forceEnd 用于主动揭晓场景
-      if (forceEnd || messages.value[aiIndex].text.includes('游戏结束')) {
+    onDone: state => {
+      // 会话终态由后端状态机（Redis）决定，前端不解析 AI 文本
+      if (state !== 'RUNNING') {
         gameEnded.value = true
       }
     },

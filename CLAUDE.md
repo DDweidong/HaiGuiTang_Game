@@ -43,9 +43,9 @@ Node `^20.19.0 || >=22.12.0` required. No test or lint setup exists.
 
 ### The game logic lives in the LLM prompt, not in code
 
-`GameAgent` (`backend/src/main/java/com/weidong/gamebackend/assistant/GameAgent.java`) is a LangChain4j `@AiService` interface — it is the entire game host. Its system message is `src/main/resources/haiguitang-prompt-template.txt`, which defines all gameplay rules (yes/no/irrelevant answers only, two-level hint system, when the game ends). There is no game-state code; changing game behavior means editing the prompt template.
+`GameAgent` (`backend/src/main/java/com/weidong/gamebackend/assistant/GameAgent.java`) is a LangChain4j `@AiService` interface — it is the entire game host. Its system message is `src/main/resources/haiguitang-prompt-template.txt`, which defines all gameplay rules (yes/no/irrelevant answers only, two-level hint system, when the game ends). Changing gameplay behavior means editing the prompt template; **game termination is a backend state machine** (below).
 
-Key contract between prompt and frontend: when the game ends, the LLM must output a response whose **first line is exactly `游戏结束`**. `HomeView.vue` detects the end of game with `text.includes("游戏结束")` — never break this string in the prompt or the UI.
+Key contract: the backend drives game end via `GameStateService` (Redis, `hgt:game-state:{memoryId}`, TTL 7d): `RUNNING` → `SOLVED` (猜对，GameResultTool 落库成功) or `REVEALED` (揭晓，结构化输出落库成功). The SSE `done` event carries `state`; `HomeView.vue` ends the game when `state !== "RUNNING"`. The "游戏结束" first line in AI text is now **display convention only** (kept for UX) — no code parses it.
 
 ### Auth (W2 用户体系)
 
@@ -55,11 +55,14 @@ Key contract between prompt and frontend: when the game ends, the LLM must outpu
 
 ### Chat flow
 
-1. 前端生成 `memoryId = "${userId}/${timestamp}"`（`HomeView.vue`，userId 来自登录态）并发送 `PUT /chat`（`@Valid` `dto/ChatRequest`）；`GameController` 校验 memoryId 前缀与登录用户一致，防止伪造他人会话。
-2. `GameController` 委托 `GameAgent.chat(memoryId, message)` — 同步调用返回原始 AI 回复字符串（无 SSE/流式）。
-3. `GameAgentConfig` 提供 `ChatMemoryProvider`: per-memoryId `MessageWindowChatMemory`，最多 60 条，内存存储（Redis 计划中）。
-4. 玩家猜对时 LLM 自主调用 `saveGameResult` 工具（`tool/GameResultTool.java`）: userId **从 Spring Security 上下文取**（工具与 /chat 同一请求线程同步执行），不经过 LLM；roomId 为 memoryId，title/solution 由 LLM 提供，落库 `completed_games`。
-5. 前端在 30 条消息后强制揭晓答案（"猜不出来，公布答案"）。
+1. 前端生成 `memoryId = "${userId}/${timestamp}"`（`HomeView.vue`，userId 来自登录态）并发送 `PUT /chat`（`@Valid` `dto/ChatRequest`）；`GameController` 校验 memoryId 前缀与登录用户一致，防止伪造他人会话；Redis 状态机已终态的会话拒绝继续对话。
+2. `GameController` 按消息分流:
+   - 揭晓类消息（`公布答案|揭晓答案|结束游戏|猜不出来|放弃|不玩了`）→ **`GameRevealAgent.reveal`（同步 + 结构化输出）**: 类型化返回 `GameReveal{title, solution, reply}`（LangChain4j 类型化返回自动走 JSON 模式），业务代码自行落库 + 置状态 `REVEALED`——揭晓不依赖 LLM 自主调用工具，根治"只恭喜不落库"。系统消息 `haiguitang-reveal-template.txt`（独立于主 prompt）。
+   - 常规消息 → `GameAgent.chatStream`（流式）: SSE `token/done/error` 事件，`done` 携带状态机终态。
+3. `GameAgentConfig` 提供 `ChatMemoryProvider`: per-memoryId `MessageWindowChatMemory`，最多 60 条，`RedisChatMemoryStore` 持久化（`hgt:chat-memory:{memoryId}`，TTL 7 天）；`GameAgent` 与 `GameRevealAgent` 共享该 provider（同一 memoryId 同一历史）。
+4. 玩家猜对时 LLM 自主调用 `saveGameResult` 工具（`tool/GameResultTool.java`）: userId 优先从 SecurityContext 取；SSE 流式下工具在模型 SDK 回调线程执行、ThreadLocal 安全上下文不传播，回退为解析 memoryId 前缀（入口已校验归属，不经过 LLM）。落库成功后置状态 `SOLVED`。
+5. 前端在 30 条消息后自动发送"猜不出来，公布答案"（后端识别后走揭晓分支）。
+6. token 用量: 流式路径在 `onCompleteResponse` 聚合落库（每次 /chat 一条）；揭晓同步路径由 `SyncUsageListener`（ChatModelListener + `SyncUsageContext` ThreadLocal）按模型调用落库，两条路径互不重复。
 
 ### Web layer conventions
 
@@ -90,6 +93,7 @@ Key contract between prompt and frontend: when the game ends, the LLM must outpu
 
 - CORS 必须注册在 **Security 层**（`CorsConfig` 提供 `CorsConfigurationSource` bean + `http.cors(withDefaults())`）: 401/403 由 Security 过滤器直接写出、不经过 MVC，只配 `WebMvcConfigurer` 时这些响应无 CORS 头，浏览器报 CORS 错误且前端拿不到 401 状态码，自动刷新链路失效。
 - LangChain4j 1.20.0-beta30 的 `@V` 参数传播**不生效**（参数会暴露给 LLM 被自由发挥），勿使用；用户身份一律从 SecurityContext 取，不经过 LLM。
-- `GameResultTool.saveGameResult` 的 title/solution 由 LLM 自由发挥填写；LLM 可能"只恭喜不调用工具"（prompt 已强化，工具入口有日志；根治靠 W3 结构化输出）。
+- 猜对路径的 `GameResultTool.saveGameResult` 仍由 LLM 自主决定调用、title/solution 由 LLM 填写——若 LLM "只恭喜不调用工具"，游戏不结束但**记录最终必落库**（玩家放弃走揭晓分支，由业务代码落库）；揭晓路径已完全不依赖工具（W3 结构化输出）。
+- 结构化输出（`GameReveal` 类型化返回）在 1.20.0-beta30 只支持非流式模型，故揭晓走独立的同步 `GameRevealAgent`（qwenChatModel），流式与结构化输出不可混在同一 `@AiService`。
 - Version pins (rationale in pom comments): MyBatis-Plus locked at 3.5.9 (3.5.17 restructured packages; 3.5.9 needs explicit `mybatis-plus-extension` + `mybatis-plus-jsqlparser` modules for Page/分页插件); SpringDoc locked at 2.8.x (3.x pulls Spring Boot 4 modules, causing `conventionErrorViewResolver` duplicate-registration startup failure); LangChain4j spring starters only exist as betas.
 - Test coverage is minimal (a single `contextLoads` test); the Spring context pulls in the datasource and LangChain4j config, so tests need a running MySQL and `DB_PASSWORD`.

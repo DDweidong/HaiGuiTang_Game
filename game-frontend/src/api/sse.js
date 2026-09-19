@@ -11,7 +11,7 @@ const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080'
  * @param {string}   options.memoryId 会话ID
  * @param {string}   options.message  玩家消息
  * @param {function} options.onToken  收到增量文本片段时回调
- * @param {function} options.onDone   生成结束时回调
+ * @param {function} options.onDone   生成结束时回调，入参为会话状态（RUNNING/SOLVED/REVEALED）
  * @param {function} options.onError  出错时回调（Promise 正常 resolve，不抛异常）
  */
 export async function streamChat({ memoryId, message, onToken, onDone, onError }) {
@@ -83,7 +83,7 @@ async function readStream(body, { onToken, onDone, onError }) {
         if (!line.startsWith('data:')) continue
         const event = JSON.parse(line.slice(5).trim())
         if (event.type === 'token') onToken(event.text)
-        else if (event.type === 'done') onDone()
+        else if (event.type === 'done') onDone(event.state || 'RUNNING')
         else if (event.type === 'error') onError(new Error(event.message || 'AI 生成失败'))
       }
     }

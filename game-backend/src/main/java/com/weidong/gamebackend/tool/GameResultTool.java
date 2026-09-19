@@ -34,7 +34,7 @@ public class GameResultTool {
      * @param title    题目标题
      * @param solution 真相内容
      */
-    @Tool("当用户猜对海龟汤谜题时，调用此方法保存游戏完成记录")
+    @Tool("当游戏结束时（玩家猜对真相，或玩家要求公布答案/结束游戏），调用此方法保存游戏完成记录")
     public String saveGameResult(@ToolMemoryId String memoryId, String title, String solution) {
         // 入口日志: 用于区分"LLM 未调用工具"与"调用后执行失败"两类问题
         log.info("收到保存游戏记录请求, memoryId={}, title={}", memoryId, title);
@@ -49,7 +49,10 @@ public class GameResultTool {
             turtleSoupService.saveTurtleSoup(record);
 
             log.info("游戏记录保存成功, memoryId={}", memoryId);
-            return "恭喜！游戏记录已成功保存。";
+            // 注意: 该返回值会作为工具执行结果进入 LLM 上下文，参与下一轮生成，
+            // 因此必须引导模型按系统提示词的结束格式回复玩家，而不是让它"确认保存成功"
+            return "记录已保存。现在请严格按照系统提示词中的【最高铁律 · 游戏结束协议】回复玩家："
+                    + "第一行是“游戏结束”，然后说明恭喜（若猜对）或遗憾（若未猜对），并给出完整真相。";
         } catch (Exception e) {
             log.error("保存游戏记录失败, memoryId={}", memoryId, e);
             return "保存失败，请稍后再试。";

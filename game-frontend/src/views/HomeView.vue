@@ -95,13 +95,14 @@ const sendMessage = async () => {
 
     // 检查是否达到30条消息限制
     if (messageCount.value >= 30) {
-      // 自动发送"猜不出来，公布答案"
+      // 自动发送"猜不出来，公布答案"；前端主动发起的揭晓，回复到达即视为游戏结束
+      // （不依赖 AI 回复里的"游戏结束"标记——qwen-max 指令遵循不稳定，见后端 prompt 铁律）
       try {
         const reply = await http.put('/chat', {
           memoryId: memoryId.value,
           message: '猜不出来，公布答案'
         })
-        handleChatReply(reply)
+        handleChatReply(reply, true)
       } catch (error) {
         console.error('Error:', error)
       }
@@ -114,7 +115,8 @@ const sendMessage = async () => {
         memoryId: memoryId.value,
         message: userMessage
       })
-      handleChatReply(reply)
+      // 用户主动要求揭晓/结束的消息同样强制结束游戏
+      handleChatReply(reply, REVEAL_PATTERN.test(userMessage))
     } catch (error) {
       messages.value.push({ sender: 'ai', text: '网络错误，请检查连接后重试。' })
       scrollToBottom()
@@ -141,10 +143,14 @@ const resetGame = () => {
   memoryId.value = ''
 }
 
-// 把 AI 回复加入消息列表；约定: 游戏结束时 AI 回复包含"游戏结束"
-const handleChatReply = (reply) => {
+// 揭晓/结束类请求: 与后端 prompt 铁律的触发词保持一致
+const REVEAL_PATTERN = /公布答案|揭晓答案|结束游戏|猜不出来|放弃|不玩了/
+
+// 把 AI 回复加入消息列表；约定: 游戏结束时 AI 回复包含"游戏结束"，
+// forceEnd 用于前端主动发起揭晓的场景（不依赖 AI 是否输出该标记）
+const handleChatReply = (reply, forceEnd = false) => {
   messages.value.push({ sender: 'ai', text: reply })
-  if (reply.includes('游戏结束')) {
+  if (forceEnd || reply.includes('游戏结束')) {
     gameEnded.value = true
   }
   scrollToBottom()

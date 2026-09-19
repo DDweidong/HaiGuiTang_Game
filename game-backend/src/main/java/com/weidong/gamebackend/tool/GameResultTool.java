@@ -1,8 +1,10 @@
 package com.weidong.gamebackend.tool;
 
+import com.weidong.gamebackend.model.SoupQuestion;
 import com.weidong.gamebackend.model.TurtleSoup;
 import com.weidong.gamebackend.security.SecurityUtil;
 import com.weidong.gamebackend.service.GameStateService;
+import com.weidong.gamebackend.service.SoupQuestionService;
 import com.weidong.gamebackend.service.TurtleSoupService;
 import dev.langchain4j.agent.tool.Tool;
 import dev.langchain4j.agent.tool.ToolMemoryId;
@@ -27,6 +29,9 @@ public class GameResultTool {
     @Autowired
     private GameStateService gameStateService;
 
+    @Autowired
+    private SoupQuestionService soupQuestionService;
+
     /**
      * 当玩家猜对海龟汤真相时，调用此工具保存游戏记录。
      * 用户身份不经过 LLM（LLM 不可见、不可伪造）。
@@ -46,9 +51,19 @@ public class GameResultTool {
         // 入口日志: 用于区分"LLM 未调用工具"与"调用后执行失败"两类问题
         log.info("收到保存游戏记录请求, memoryId={}, title={}", memoryId, title);
         try {
+            // 题库局: 忽略 LLM 传参，直接用库里的标题/汤底落库——记录内容确定性，
+            // 不因 LLM 自由发挥（或答案键被记忆窗口淘汰后的幻觉）而失真
+            Long questionId = gameStateService.getQuestion(memoryId);
+            SoupQuestion question = soupQuestionService.getById(questionId);
+            if (question != null) {
+                title = question.getTitle();
+                solution = question.getTangDi();
+            }
+
             TurtleSoup record = new TurtleSoup();
             record.setUserId(resolveUserId(memoryId));
             record.setRoomId(memoryId);
+            record.setQuestionId(questionId);
             record.setTitle(title);
             record.setSolution(solution);
             record.setCompletedAt(LocalDateTime.now());

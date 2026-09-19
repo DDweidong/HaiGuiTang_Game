@@ -8,14 +8,18 @@ import com.weidong.gamebackend.assistant.SyncUsageContext;
 import com.weidong.gamebackend.common.ErrorCode;
 import com.weidong.gamebackend.common.exception.BusinessException;
 import com.weidong.gamebackend.dto.ChatRequest;
+import com.weidong.gamebackend.model.SoupQuestion;
 import com.weidong.gamebackend.model.TokenUsageRecord;
 import com.weidong.gamebackend.model.TurtleSoup;
 import com.weidong.gamebackend.security.LoginUser;
 import com.weidong.gamebackend.security.SecurityUtil;
 import com.weidong.gamebackend.service.GameStateService;
 import com.weidong.gamebackend.service.RateLimitService;
+import com.weidong.gamebackend.service.SoupQuestionService;
 import com.weidong.gamebackend.service.TokenUsageService;
 import com.weidong.gamebackend.service.TurtleSoupService;
+import dev.langchain4j.data.message.SystemMessage;
+import dev.langchain4j.memory.chat.ChatMemoryProvider;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.output.TokenUsage;
 import dev.langchain4j.service.TokenStream;
@@ -46,6 +50,9 @@ public class GameController {
     /** 揭晓类请求触发词（与前端 30 条上限时发送的文案保持一致），由后端识别，前端不可绕过 */
     private static final Pattern REVEAL_PATTERN = Pattern.compile("公布答案|揭晓答案|结束游戏|猜不出来|放弃|不玩了");
 
+    /** 玩家主动请求提示的触发词（与主 prompt【3】的关键词一致），命中时对模型回复做确定性前缀清洗 */
+    private static final Pattern HINT_REQUEST_PATTERN = Pattern.compile("提示|给点线索|卡住了");
+
     @Autowired
     private GameAgent gameAgent;
 
@@ -63,6 +70,12 @@ public class GameController {
 
     @Autowired
     private TurtleSoupService turtleSoupService;
+
+    @Autowired
+    private SoupQuestionService soupQuestionService;
+
+    @Autowired
+    private ChatMemoryProvider chatMemoryProvider;
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -97,10 +110,47 @@ public class GameController {
         // 限流: 按用户计数，防止脚本刷量烧 token（超限抛 42900）
         rateLimitService.check(loginUser.id());
 
+        if (request.getMessage().contains("开始游戏")) {
+            // 开局优先从题库抽题；该用户玩遍题库时回退 LLM 即兴出题
+            SseEmitter bankStart = tryStartFromBank(loginUser, memoryId);
+            if (bankStart != null) {
+                return bankStart;
+            }
+        }
+
         if (REVEAL_PATTERN.matcher(request.getMessage()).find()) {
             return reveal(loginUser, memoryId, request.getMessage());
         }
         return streamReply(loginUser, memoryId, request.getMessage());
+    }
+
+    /**
+     * 开局从题库抽题（返回 null 表示无题可抽，调用方回退 LLM 即兴）。
+     * 出题不经 LLM: 汤面直接由后端按【题目】/【情境】格式输出，省一次模型调用；
+     * 汤底（真相）作为系统消息注入该会话的聊天记忆——主持人每轮都能看到答案键，
+     * 但玩家看不到注入内容。游戏结束后落库时通过 questionId 关联题库（见 reveal/GameResultTool）。
+     */
+    private SseEmitter tryStartFromBank(LoginUser loginUser, String memoryId) {
+        SoupQuestion question = soupQuestionService.pick(loginUser.id());
+        if (question == null) {
+            return null;
+        }
+
+        SseEmitter emitter = new SseEmitter(STREAM_TIMEOUT_MS);
+        emitter.onTimeout(emitter::complete);
+
+        gameStateService.setQuestion(memoryId, question.getId());
+        chatMemoryProvider.get(memoryId).add(SystemMessage.from(
+                "本局题目（后台注入，玩家不可见）：《" + question.getTitle() + "》\n"
+                        + "情境：" + question.getTangMian() + "\n"
+                        + "真相：" + question.getTangDi() + "\n"
+                        + "请严格按系统提示词主持本局，判断玩家提问一律以该真相为唯一依据。"));
+
+        sendEvent(emitter, Map.of("type", "token", "text",
+                "【题目】" + question.getTitle() + "\n【情境】" + question.getTangMian()));
+        sendEvent(emitter, Map.of("type", "done", "state", GameStateService.GameState.RUNNING.name()));
+        emitter.complete();
+        return emitter;
     }
 
     /**
@@ -113,10 +163,28 @@ public class GameController {
         SseEmitter emitter = new SseEmitter(STREAM_TIMEOUT_MS);
         emitter.onTimeout(emitter::complete);
 
+        // 玩家主动请求提示时，模型偶发把"看你问了很多"前缀错用在请求场景（prompt 约束不稳），
+        // 聚合整条回复后确定性剥离该前缀——提示类回复很短，聚合发送对体验无影响
+        boolean hintRequest = HINT_REQUEST_PATTERN.matcher(message).find();
+        StringBuilder buffered = new StringBuilder();
+
         TokenStream stream = gameAgent.chatStream(memoryId, message);
-        stream.onPartialResponse(token -> sendEvent(emitter, Map.of("type", "token", "text", token)))
+        stream.onPartialResponse(token -> {
+                    if (hintRequest) {
+                        buffered.append(token);
+                    } else {
+                        sendEvent(emitter, Map.of("type", "token", "text", token));
+                    }
+                })
                 .onCompleteResponse(response -> {
                     recordUsage(userId, memoryId, response);
+                    if (hintRequest) {
+                        String text = buffered.toString().replaceFirst(
+                                "^看你问了(很|这么)多(问题)?[，,]?\\s*(就)?\\s*(给你一点提示|给你个提示|给点提示)[:：]?\\s*", "");
+                        if (!text.isBlank()) {
+                            sendEvent(emitter, Map.of("type", "token", "text", text));
+                        }
+                    }
                     // 猜对时 GameResultTool 已在回调线程落库并置状态 SOLVED，这里直接读终态
                     GameStateService.GameState state = gameStateService.get(memoryId);
                     sendEvent(emitter, Map.of("type", "done", "state", state.name()));
@@ -149,11 +217,22 @@ public class GameController {
         try {
             // 设置用量归属上下文，SyncUsageListener 在每次模型调用完成后按它记录
             SyncUsageContext.set(loginUser.id(), memoryId);
-            GameReveal reveal = gameRevealAgent.reveal(memoryId, message);
+
+            // 题库局: 把汤底注入揭晓请求，即使长对局中答案键被记忆窗口淘汰，揭晓仍准确
+            Long questionId = gameStateService.getQuestion(memoryId);
+            SoupQuestion question = soupQuestionService.getById(questionId);
+            String revealMessage = message;
+            if (question != null) {
+                revealMessage = "玩家要求公布答案。本局题目：《" + question.getTitle() + "》，"
+                        + "完整真相：" + question.getTangDi() + "。请按此输出 JSON。";
+            }
+
+            GameReveal reveal = gameRevealAgent.reveal(memoryId, revealMessage);
 
             TurtleSoup record = new TurtleSoup();
             record.setUserId(String.valueOf(loginUser.id()));
             record.setRoomId(memoryId);
+            record.setQuestionId(questionId);
             record.setTitle(reveal.title());
             record.setSolution(reveal.solution());
             record.setCompletedAt(LocalDateTime.now());

@@ -26,6 +26,9 @@ public class TurtleSoup {
     /** 游戏会话ID（即 memoryId），一局游戏唯一 */
     private String roomId;
 
+    /** 题库题目ID（NULL=LLM 即兴出题），用于抽取时排除该用户已玩过的题 */
+    private Long questionId;
+
     /** 题目标题 */
     private String title;
 

@@ -19,6 +19,7 @@ import java.time.Duration;
 public class GameStateService {
 
     private static final String KEY_PREFIX = "hgt:game-state:";
+    private static final String QUESTION_KEY_PREFIX = "hgt:game-question:";
     private static final Duration TTL = Duration.ofDays(7);
 
     private final StringRedisTemplate redisTemplate;
@@ -44,6 +45,17 @@ public class GameStateService {
 
     public void markRevealed(String memoryId) {
         redisTemplate.opsForValue().set(KEY_PREFIX + memoryId, GameState.REVEALED.name(), TTL);
+    }
+
+    /** 记录本局抽中的题库题目（开局从题库出题时写入；LLM 即兴局不写入） */
+    public void setQuestion(String memoryId, Long questionId) {
+        redisTemplate.opsForValue().set(QUESTION_KEY_PREFIX + memoryId, String.valueOf(questionId), TTL);
+    }
+
+    /** 本局抽中的题库题目ID，null 表示 LLM 即兴局 */
+    public Long getQuestion(String memoryId) {
+        String value = redisTemplate.opsForValue().get(QUESTION_KEY_PREFIX + memoryId);
+        return value == null ? null : Long.valueOf(value);
     }
 
     public enum GameState {

@@ -57,10 +57,11 @@ Key contract: the backend drives game end via `GameStateService` (Redis, `hgt:ga
 
 1. 前端生成 `memoryId = "${userId}/${timestamp}"`（`HomeView.vue`，userId 来自登录态）并发送 `PUT /chat`（`@Valid` `dto/ChatRequest`）；`GameController` 校验 memoryId 前缀与登录用户一致，防止伪造他人会话；Redis 状态机已终态的会话拒绝继续对话。
 2. `GameController` 按消息分流:
-   - 揭晓类消息（`公布答案|揭晓答案|结束游戏|猜不出来|放弃|不玩了`）→ **`GameRevealAgent.reveal`（同步 + 结构化输出）**: 类型化返回 `GameReveal{title, solution, reply}`（LangChain4j 类型化返回自动走 JSON 模式），业务代码自行落库 + 置状态 `REVEALED`——揭晓不依赖 LLM 自主调用工具，根治"只恭喜不落库"。系统消息 `haiguitang-reveal-template.txt`（独立于主 prompt）。
+   - 开局（消息含"开始游戏"）→ **题库抽题**（`SoupQuestionService.pick`）: 排除该用户已玩过的题（`completed_games.question_id` 关联，同一题可给不同用户重复用），新玩家（完成 0~2 局）优先简单题；抽中则汤面由后端直接按【题目】/【情境】输出（不经 LLM、省一次调用），汤底作为系统消息注入该会话聊天记忆（主持人每轮可见答案键，玩家不可见），`hgt:game-question:{memoryId}` 记录 questionId 供落库关联。**该用户玩遍题库时回退 LLM 即兴出题**（题库是质量下限与成本优化，不是架构瓶颈）。
+   - 揭晓类消息（`公布答案|揭晓答案|结束游戏|猜不出来|放弃|不玩了`）→ **`GameRevealAgent.reveal`（同步 + 结构化输出）**: 类型化返回 `GameReveal{title, solution, reply}`（LangChain4j 类型化返回自动走 JSON 模式），业务代码自行落库 + 置状态 `REVEALED`——揭晓不依赖 LLM 自主调用工具，根治"只恭喜不落库"。系统消息 `haiguitang-reveal-template.txt`（独立于主 prompt）。题库局会把汤底注入揭晓请求，保证长对局下揭晓内容仍准确。
    - 常规消息 → `GameAgent.chatStream`（流式）: SSE `token/done/error` 事件，`done` 携带状态机终态。
-3. `GameAgentConfig` 提供 `ChatMemoryProvider`: per-memoryId `MessageWindowChatMemory`，最多 60 条，`RedisChatMemoryStore` 持久化（`hgt:chat-memory:{memoryId}`，TTL 7 天）；`GameAgent` 与 `GameRevealAgent` 共享该 provider（同一 memoryId 同一历史）。
-4. 玩家猜对时 LLM 自主调用 `saveGameResult` 工具（`tool/GameResultTool.java`）: userId 优先从 SecurityContext 取；SSE 流式下工具在模型 SDK 回调线程执行、ThreadLocal 安全上下文不传播，回退为解析 memoryId 前缀（入口已校验归属，不经过 LLM）。落库成功后置状态 `SOLVED`。
+3. `GameAgentConfig` 提供 `ChatMemoryProvider`: per-memoryId `MessageWindowChatMemory`，最多 80 条（60 条问答 + 开局注入的答案键 + 工具返回值，保证答案键整局不被窗口淘汰），`RedisChatMemoryStore` 持久化（`hgt:chat-memory:{memoryId}`，TTL 7 天）；`GameAgent` 与 `GameRevealAgent` 共享该 provider（同一 memoryId 同一历史）。
+4. 玩家猜对时 LLM 自主调用 `saveGameResult` 工具（`tool/GameResultTool.java`）: userId 优先从 SecurityContext 取；SSE 流式下工具在模型 SDK 回调线程执行、ThreadLocal 安全上下文不传播，回退为解析 memoryId 前缀（入口已校验归属，不经过 LLM）。题库局忽略 LLM 传参、直接用库里的标题/汤底落库（记录确定性）。落库成功后置状态 `SOLVED`。
 5. 前端在 30 条消息后自动发送"猜不出来，公布答案"（后端识别后走揭晓分支）。
 6. token 用量: 流式路径在 `onCompleteResponse` 聚合落库（每次 /chat 一条）；揭晓同步路径由 `SyncUsageListener`（ChatModelListener + `SyncUsageContext` ThreadLocal）按模型调用落库，两条路径互不重复。
 

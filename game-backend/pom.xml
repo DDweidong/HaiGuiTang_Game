@@ -108,6 +108,12 @@
 			<artifactId>langchain4j-spring-boot-starter</artifactId>
 			<version>${langchain4j.version}</version>
 		</dependency>
+		<!-- Redis (Lettuce 客户端): W3 聊天记忆持久化 + /chat 接口限流。
+		     选型理由见规划文档: 单实例内存记忆重启即丢且无法横向扩展，限流需要共享计数存储 -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-data-redis</artifactId>
+		</dependency>
 		<!-- SpringDoc 接口文档: /swagger-ui.html 在线查看与调试 -->
 		<dependency>
 			<groupId>org.springdoc</groupId>

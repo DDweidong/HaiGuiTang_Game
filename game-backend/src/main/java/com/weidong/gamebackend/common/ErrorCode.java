@@ -18,6 +18,7 @@ public enum ErrorCode {
     UNAUTHORIZED(40100, "未登录或登录已过期"),
     NOT_FOUND(40400, "资源不存在"),
     FORBIDDEN(40300, "无权访问"),
+    RATE_LIMITED(42900, "请求过于频繁，请稍后再试"),
     SYSTEM_ERROR(50000, "系统繁忙，请稍后再试");
 
     private final int code;

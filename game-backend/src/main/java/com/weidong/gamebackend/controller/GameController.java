@@ -7,6 +7,7 @@ import com.weidong.gamebackend.common.exception.BusinessException;
 import com.weidong.gamebackend.dto.ChatRequest;
 import com.weidong.gamebackend.security.LoginUser;
 import com.weidong.gamebackend.security.SecurityUtil;
+import com.weidong.gamebackend.service.RateLimitService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -21,6 +22,9 @@ public class GameController {
 
     @Autowired
     private GameAgent gameAgent;
+
+    @Autowired
+    private RateLimitService rateLimitService;
 
     /**
      * 与 AI 主持人对话。
@@ -38,6 +42,9 @@ public class GameController {
         if (memoryId == null || !memoryId.startsWith(expectedPrefix)) {
             throw new BusinessException(ErrorCode.FORBIDDEN, "会话不属于当前用户");
         }
+
+        // 限流: 按用户计数，防止脚本刷量烧 token（超限抛 42900）
+        rateLimitService.check(loginUser.id());
 
         String reply = gameAgent.chat(memoryId, request.getMessage());
         return Result.success(reply);

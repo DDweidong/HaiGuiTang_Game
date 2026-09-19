@@ -35,3 +35,13 @@ jwt:
   # access: 30 分钟，控制凭据暴露窗口；refresh: 7 天，减少重复登录
   access-expiration: 1800000
   refresh-expiration: 604800000
+
+# 接口限流: LLM 按 token 计费，/chat 是唯一直接消耗模型费用的接口，需防脚本刷量
+hgt:
+  rate-limit:
+    chat:
+      # 每窗口允许的请求数。正常玩家受 LLM 生成耗时(10~30s)约束，每分钟最多 2~3 条，
+      # 10 条已留足余量，同时限制脚本批量调用
+      max-requests: 10
+      # 固定窗口时长（秒）
+      window-seconds: 60

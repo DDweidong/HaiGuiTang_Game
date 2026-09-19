@@ -1,5 +1,12 @@
 # 开发环境配置
 spring:
+  data:
+    redis:
+      # 本地开发: WSL2 Ubuntu 内 Docker 跑的 Redis，端口已映射到 Windows localhost。
+      # 必须写 127.0.0.1: Java 解析 localhost 优先走 IPv6 ::1，而 WSL2 只把 IPv4 转发到 Windows，
+      # 连 IPv6 会失败（PowerShell 等客户端会自动 fallback 所以不易察觉）
+      host: 127.0.0.1
+      port: 6379
   datasource:
     # allowPublicKeyRetrieval: MySQL 8 默认 caching_sha2_password，本地无 SSL 时需允许取公钥（仅开发环境）
     url: jdbc:mysql://localhost:3306/haiguitang?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8&allowPublicKeyRetrieval=true

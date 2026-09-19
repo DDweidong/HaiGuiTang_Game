@@ -76,3 +76,5 @@ async function handleUnauthorized(config) {
 }
 
 export default http
+// fetch 直连 SSE 时绕过 axios 拦截器，401 场景由 sse.js 复用该刷新逻辑
+export { refreshLogin }

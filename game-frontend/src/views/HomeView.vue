@@ -29,14 +29,14 @@
           </div>
         </div>
         <div class="input-area">
-          <input 
-            type="text" 
-            v-model="userInput" 
+          <input
+            type="text"
+            v-model="userInput"
             placeholder="请输入你的问题..."
             @keyup.enter="sendMessage"
-            :disabled="gameEnded"
+            :disabled="gameEnded || sending"
           >
-          <button @click="handleButtonAction" :class="{ 'back-button': gameEnded }">
+          <button @click="handleButtonAction" :class="{ 'back-button': gameEnded }" :disabled="sending">
             {{ gameEnded ? '返回首页' : '发送' }}
           </button>
         </div>
@@ -47,16 +47,20 @@
 
 <script setup>
 import { ref, nextTick } from 'vue'
-import http from '../api/http'
+import { streamChat } from '../api/sse'
 import { getUser } from '../utils/auth'
 
 const gameStarted = ref(false)
 const gameEnded = ref(false)
+const sending = ref(false)
 const messages = ref([])
 const userInput = ref('')
 const messagesContainer = ref(null)
 const memoryId = ref('')
 const messageCount = ref(0)
+
+// 揭晓/结束类请求: 与后端 prompt 铁律的触发词保持一致
+const REVEAL_PATTERN = /公布答案|揭晓答案|结束游戏|猜不出来|放弃|不玩了/
 
 const startGame = async () => {
   gameStarted.value = true
@@ -69,59 +73,50 @@ const startGame = async () => {
   // 清空消息
   messages.value = []
 
-  try {
-    // http 拦截器已解包 Result，直接拿到 AI 回复文本
-    const reply = await http.put('/chat', {
-      memoryId: memoryId.value,
-      message: '开始游戏'
-    })
-    handleChatReply(reply)
-  } catch (error) {
-    messages.value.push({ sender: 'ai', text: '抱歉，初始化游戏时出现错误。' })
-    scrollToBottom()
-  }
+  await sendToAi('开始游戏', false)
 }
 
 const sendMessage = async () => {
-  if (userInput.value.trim() !== '' && !gameEnded.value) {
-    // 添加用户消息
-    messages.value.push({ sender: 'me', text: userInput.value })
-    const userMessage = userInput.value
-    userInput.value = ''
-    messageCount.value++
+  if (userInput.value.trim() === '' || gameEnded.value || sending.value) return
 
-    // 滚动到底部
-    scrollToBottom()
+  messages.value.push({ sender: 'me', text: userInput.value })
+  const userMessage = userInput.value
+  userInput.value = ''
+  messageCount.value++
+  scrollToBottom()
 
-    // 检查是否达到30条消息限制
-    if (messageCount.value >= 30) {
-      // 自动发送"猜不出来，公布答案"；前端主动发起的揭晓，回复到达即视为游戏结束
-      // （不依赖 AI 回复里的"游戏结束"标记——qwen-max 指令遵循不稳定，见后端 prompt 铁律）
-      try {
-        const reply = await http.put('/chat', {
-          memoryId: memoryId.value,
-          message: '猜不出来，公布答案'
-        })
-        handleChatReply(reply, true)
-      } catch (error) {
-        console.error('Error:', error)
+  // 达到30条消息上限自动揭晓；前端主动发起的揭晓，回复到达即视为游戏结束
+  // （不依赖 AI 回复里的"游戏结束"标记——qwen-max 指令遵循不稳定，见后端 prompt 铁律）
+  const reveal = messageCount.value >= 30
+  await sendToAi(reveal ? '猜不出来，公布答案' : userMessage, reveal || REVEAL_PATTERN.test(userMessage))
+}
+
+// 发送消息并流式接收 AI 回复：先放一个空的 AI 气泡占位，token 到达时增量填充
+const sendToAi = async (message, forceEnd) => {
+  sending.value = true
+  const aiIndex = messages.value.push({ sender: 'ai', text: '' }) - 1
+  scrollToBottom()
+  await streamChat({
+    memoryId: memoryId.value,
+    message,
+    onToken: text => {
+      messages.value[aiIndex].text += text
+      scrollToBottom()
+    },
+    onDone: () => {
+      // 约定: 游戏结束时 AI 回复包含"游戏结束"；forceEnd 用于主动揭晓场景
+      if (forceEnd || messages.value[aiIndex].text.includes('游戏结束')) {
+        gameEnded.value = true
       }
-      return
-    }
-
-    // 发送用户消息到后端
-    try {
-      const reply = await http.put('/chat', {
-        memoryId: memoryId.value,
-        message: userMessage
-      })
-      // 用户主动要求揭晓/结束的消息同样强制结束游戏
-      handleChatReply(reply, REVEAL_PATTERN.test(userMessage))
-    } catch (error) {
-      messages.value.push({ sender: 'ai', text: '网络错误，请检查连接后重试。' })
+    },
+    onError: err => {
+      messages.value[aiIndex].text = messages.value[aiIndex].text
+        ? `${messages.value[aiIndex].text}\n（连接中断: ${err.message}）`
+        : '网络错误，请检查连接后重试。'
       scrollToBottom()
     }
-  }
+  })
+  sending.value = false
 }
 
 const handleButtonAction = () => {
@@ -141,19 +136,6 @@ const resetGame = () => {
   userInput.value = ''
   messageCount.value = 0
   memoryId.value = ''
-}
-
-// 揭晓/结束类请求: 与后端 prompt 铁律的触发词保持一致
-const REVEAL_PATTERN = /公布答案|揭晓答案|结束游戏|猜不出来|放弃|不玩了/
-
-// 把 AI 回复加入消息列表；约定: 游戏结束时 AI 回复包含"游戏结束"，
-// forceEnd 用于前端主动发起揭晓的场景（不依赖 AI 是否输出该标记）
-const handleChatReply = (reply, forceEnd = false) => {
-  messages.value.push({ sender: 'ai', text: reply })
-  if (forceEnd || reply.includes('游戏结束')) {
-    gameEnded.value = true
-  }
-  scrollToBottom()
 }
 
 const scrollToBottom = () => {

@@ -4,6 +4,14 @@ spring:
   # 通过环境变量切换环境，默认 dev
   profiles:
     active: ${SPRING_PROFILES_ACTIVE:dev}
+  security:
+    filter:
+      # 安全过滤器只处理 request/error 分发，不参与 async 分发。
+      # SseEmitter 每次发事件都触发一次 async dispatch，默认配置下安全过滤器链
+      # 会整体重跑，异步线程上认证上下文为空，AuthorizationFilter 抛 AccessDenied，
+      # 此时 SSE 响应已提交、403 也写不出去（"response is already committed"）。
+      # 认证在原始请求上已完成，异步阶段重跑安全链没有意义。
+      dispatcher-types: request, error
 
 # MyBatis-Plus 配置
 mybatis-plus:
@@ -21,6 +29,11 @@ langchain4j:
     dashscope:
       chat-model:
         # API Key 必须走环境变量，禁止写入配置文件
+        api-key: ${DASH_SCOPE_API_KEY}
+        model-name: qwen-max
+      # SSE 流式输出用 qwenStreamingChatModel，starter 对其单独做了
+      # @ConditionalOnProperty，必须显式给出 api-key 才会创建该 bean
+      streaming-chat-model:
         api-key: ${DASH_SCOPE_API_KEY}
         model-name: qwen-max
 

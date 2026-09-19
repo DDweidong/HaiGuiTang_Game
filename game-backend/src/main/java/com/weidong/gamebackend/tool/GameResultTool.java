@@ -25,8 +25,11 @@ public class GameResultTool {
 
     /**
      * 当玩家猜对海龟汤真相时，调用此工具保存游戏记录。
-     * 用户身份不经过 LLM（LLM 不可见、不可伪造）：工具与 /chat 在同一请求线程内
-     * 同步执行，直接从 Spring Security 上下文取登录用户。
+     * 用户身份不经过 LLM（LLM 不可见、不可伪造）。
+     * 同步调用时代码与 /chat 在同一请求线程执行，可直接从 SecurityContext 取登录用户；
+     * SSE 流式下工具在模型 SDK 回调线程执行、ThreadLocal 安全上下文不传播，
+     * 此时回退为解析 memoryId 前缀——memoryId 已在 /chat 入口校验过归属
+     * （"userId/timestamp" 格式），且该参数由 LangChain4j 注入、不经过 LLM。
      * （曾尝试 LangChain4j @V 参数传播，1.20.0-beta30 中未生效——
      * userId 参数被暴露给 LLM 并被其自由发挥填成"玩家123"，见规划文档 §7 踩坑记录。）
      *
@@ -40,7 +43,7 @@ public class GameResultTool {
         log.info("收到保存游戏记录请求, memoryId={}, title={}", memoryId, title);
         try {
             TurtleSoup record = new TurtleSoup();
-            record.setUserId(String.valueOf(SecurityUtil.currentUser().id()));
+            record.setUserId(resolveUserId(memoryId));
             record.setRoomId(memoryId);
             record.setTitle(title);
             record.setSolution(solution);
@@ -56,6 +59,14 @@ public class GameResultTool {
         } catch (Exception e) {
             log.error("保存游戏记录失败, memoryId={}", memoryId, e);
             return "保存失败，请稍后再试。";
+        }
+    }
+
+    private String resolveUserId(String memoryId) {
+        try {
+            return String.valueOf(SecurityUtil.currentUser().id());
+        } catch (Exception e) {
+            return memoryId.substring(0, memoryId.indexOf('/'));
         }
     }
 }

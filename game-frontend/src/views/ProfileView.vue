@@ -3,7 +3,7 @@
     <h1 class="section-title">用量统计</h1>
     <div class="stats-cards" v-if="summary.totalCalls > 0">
       <div class="stat-card">
-        <div class="stat-label">累计调用次数</div>
+        <div class="stat-label">累计对话次数</div>
         <div class="stat-value">{{ summary.totalCalls }}</div>
       </div>
       <div class="stat-card">
@@ -20,16 +20,6 @@
       </div>
     </div>
     <div class="no-usage" v-else>暂无用量数据，去玩一局吧</div>
-
-    <div class="records-section" v-if="records.length > 0">
-      <h2 class="section-title">最近调用明细</h2>
-      <el-table :data="records" stripe style="width: 100%">
-        <el-table-column prop="createdAt" label="时间" width="180" />
-        <el-table-column prop="model" label="模型" width="140" />
-        <el-table-column prop="inputTokens" label="输入 Token" />
-        <el-table-column prop="outputTokens" label="输出 Token" />
-      </el-table>
-    </div>
 
     <h1 class="section-title">已完成</h1>
     <div class="cards-container" v-if="cards.length > 0">
@@ -51,6 +41,16 @@
     </div>
     <div class="no-data" v-else>
       <div class="no-data-text">暂无数据</div>
+    </div>
+
+    <div class="records-section" v-if="records.length > 0">
+      <h2 class="section-title">最近调用明细</h2>
+      <el-table :data="records" stripe style="width: 100%">
+        <el-table-column prop="createdAt" label="时间" width="180" />
+        <el-table-column prop="model" label="模型" width="140" />
+        <el-table-column prop="inputTokens" label="输入 Token" />
+        <el-table-column prop="outputTokens" label="输出 Token" />
+      </el-table>
     </div>
   </div>
 </template>

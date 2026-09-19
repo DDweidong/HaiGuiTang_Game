@@ -1,0 +1,56 @@
+# 海龟汤一键部署编排: mysql + redis + backend + frontend
+# 用法: 复制 .env.example 为 .env 并填写密钥, 然后 docker compose up -d --build
+# 访问 http://localhost (frontend 的 Nginx 托管页面并反代 /api 到 backend)
+services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:?请在 .env 中设置 DB_PASSWORD}
+      MYSQL_DATABASE: haiguitang
+    volumes:
+      - hgt-mysql-data:/var/lib/mysql
+    healthcheck:
+      # $$ 转义 compose 变量插值, $MYSQL_ROOT_PASSWORD 由容器 shell 展开
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$$MYSQL_ROOT_PASSWORD"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build: ./game-backend
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      # prod profile 数据源: 服务名即容器网络 DNS
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      DB_NAME: haiguitang
+      DB_USERNAME: root
+      DB_PASSWORD: ${DB_PASSWORD:?请在 .env 中设置 DB_PASSWORD}
+      REDIS_HOST: redis
+      JWT_SECRET: ${JWT_SECRET:?请在 .env 中设置 JWT_SECRET}
+      DASH_SCOPE_API_KEY: ${DASH_SCOPE_API_KEY:?请在 .env 中设置 DASH_SCOPE_API_KEY}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build: ./game-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  hgt-mysql-data:

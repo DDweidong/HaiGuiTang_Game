@@ -69,3 +69,6 @@ coverage
 # Vitest
 __screenshots__/
 
+# docker-compose 本地密钥(模板见 .env.example)
+.env
+

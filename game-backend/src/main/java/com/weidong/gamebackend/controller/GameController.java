@@ -1,5 +1,6 @@
 package com.weidong.gamebackend.controller;
 
+import com.weidong.gamebackend.assistant.ChatUsageContext;
 import com.weidong.gamebackend.assistant.GameAgent;
 import com.weidong.gamebackend.common.ErrorCode;
 import com.weidong.gamebackend.common.Result;
@@ -46,7 +47,14 @@ public class GameController {
         // 限流: 按用户计数，防止脚本刷量烧 token（超限抛 42900）
         rateLimitService.check(loginUser.id());
 
-        String reply = gameAgent.chat(memoryId, request.getMessage());
-        return Result.success(reply);
+        // 把用户与会话上下文放进 ThreadLocal，供 TokenUsageListener 记录用量归属；
+        // 模型调用与当前线程同步执行，finally 确保清理
+        ChatUsageContext.set(loginUser.id(), memoryId);
+        try {
+            String reply = gameAgent.chat(memoryId, request.getMessage());
+            return Result.success(reply);
+        } finally {
+            ChatUsageContext.clear();
+        }
     }
 }

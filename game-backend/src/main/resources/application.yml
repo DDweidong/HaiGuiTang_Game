@@ -45,3 +45,7 @@ hgt:
       max-requests: 10
       # 固定窗口时长（秒）
       window-seconds: 60
+  # token 成本估算单价（元/百万 token），qwen-max 官方定价（2026-09 阿里云百炼），调价时改这里即可
+  pricing:
+    input-yuan-per-1m: 2.4
+    output-yuan-per-1m: 9.6
